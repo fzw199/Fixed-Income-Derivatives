@@ -1,5 +1,5 @@
 import numpy as np
-import PS1.fixed_income_derivatives_E2025 as fid    
+import PS3.fixed_income_derivatives_E2025 as fid    
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize, Bounds
 
