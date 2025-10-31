@@ -5,7 +5,7 @@ from scipy.optimize import minimize
 # from scipy.stats import norm
 
 r0, a, b, sigma = 0.02, 0.6, 0.03, 0.02
-T_max, T_mesh = 10, 0.1
+T_max, T_mesh = 10, 1/12
 
 # ZCB prices, spot rates and instantaneous forward rates
 T = np.array([i*T_mesh for i in range(0,int(T_max/T_mesh)+1)])
@@ -34,6 +34,27 @@ lb, ub = fid.ci_vasicek(r0,a,b,sigma,t_simul,size_ci)
 mu_sd, sigma_sd = fid.mean_vasicek(r0,a,b,sigma,np.inf), fid.stdev_vasicek(r0,a,b,sigma,np.inf)
 lb_sd = fid.ci_vasicek(r0,a,b,sigma,np.inf,size_ci,type_ci = "lower")[0]
 ub_sd = fid.ci_vasicek(r0,a,b,sigma,np.inf,size_ci,type_ci = "upper")[1]
+
+# Caplet and cap prices
+strike = 0.05
+alpha = 0.25
+M = int(T_max/alpha) + 1
+price_caplet = np.zeros([len(T)])
+for i in range(2,len(T)):
+    price_caplet[i] = (1 + (T[i]-T[i-1])*strike)*fid.euro_option_price_vasicek(1/(1 + (T[i]-T[i-1])*strike),T[i-1],T[i],p[i-1],p[i],a,sigma,type = "put")
+price_cap = sum(price_caplet[2:])
+S_swap = fid.accrual_factor_from_zcb_prices(0,0,T[-1],"quarterly",T,p)
+premium_cap = (price_cap/S_swap)
+print(f"Caplet prices: {10000*price_caplet}")
+print(f"price_cap: {10000*price_cap}, premium_cap: {10000*premium_cap}")
+price_caplet_down = fid.caplet_prices_vasicek(sigma-0.001,strike,a,T,p)
+price_cap_down = sum(price_caplet_down[2:])
+premium_cap_down = (price_cap_down/S_swap)
+print(f"price_cap_down: {10000*price_cap_down}, premium_cap_down: {10000*premium_cap_down}")
+price_caplet_up = fid.caplet_prices_vasicek(sigma+0.001,strike,a,T,p)
+price_cap_up = sum(price_caplet_up[2:])
+premium_cap_up = (price_cap_up/S_swap)
+print(f"price_cap_up: {10000*price_cap_up}, premium_cap_up: {10000*premium_cap_up}")
 
 # Fitting the Vasicek model (To itself)
 param_0 = 0.03, 0.5, 0.04, 0.04
