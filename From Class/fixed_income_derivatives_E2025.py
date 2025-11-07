@@ -98,6 +98,52 @@ def forward_rates_from_zcb_prices(T,p,horizon = 1,type = "continuous"):
                 i += 1
     return f
 
+# Fixed rate bond
+def macauley_duration(pv,T,C,ytm):
+    D = 0
+    N = len(T)
+    for i in range(0,N):
+        D += C[i]*T[i]/(1+ytm)**T[i]
+    D = D/pv
+    return D
+
+def modified_duration(pv,T,C,ytm):
+    D = 0
+    N = len(T)
+    for i in range(0,N):
+        D += C[i]*T[i]/(1+ytm)**T[i]
+    D = D/(pv*(1+ytm))
+    return D
+
+def convexity(pv,T,C,ytm):
+    D = 0
+    N = len(T)
+    for i in range(0,N):
+        D += C[i]*T[i]**2/(1+ytm)**T[i]
+    D = D/pv
+    return D
+
+def price_fixed_rate_bond_from_ytm(ytm,T,C):
+    price = 0
+    N = len(T)
+    for i in range(0,N):
+        price += C[i]/(1+ytm)**T[i]
+    return price
+
+def ytm(pv,T,C,ytm_init = 0.05):
+    args = (pv, T, C, 1)
+    result = minimize(ytm_obj,ytm_init,args = args, options={'disp': False})
+    ytm = result.x[0]
+    return ytm
+
+def ytm_obj(ytm,pv,T,C,scaling = 1):
+    N = len(T)
+    pv_new = 0
+    for i in range(0,N):
+        pv_new += C[i]/(1+ytm[0])**T[i]
+    sse = scaling*(pv-pv_new)**2
+    return sse
+
 # Interest Rate Swap
 def accrual_factor_from_zcb_prices(t,T_n,T_N,fixed_freq,T,p):
     T_fix = []
@@ -167,52 +213,6 @@ def swap_rate_from_zcb_prices(t,T_n,T_N,fixed_freq,T,p,float_freq = 0,L = 0):
                 print(f"WARNING! Not able to compute the par swap rate")
                 R = np.nan
     return R, S
-
-# Fixed rate bond
-def macauley_duration(pv,T,C,ytm):
-    D = 0
-    N = len(T)
-    for i in range(0,N):
-        D += C[i]*T[i]/(1+ytm)**T[i]
-    D = D/pv
-    return D
-
-def modified_duration(pv,T,C,ytm):
-    D = 0
-    N = len(T)
-    for i in range(0,N):
-        D += C[i]*T[i]/(1+ytm)**T[i]
-    D = D/(pv*(1+ytm))
-    return D
-
-def convexity(pv,T,C,ytm):
-    D = 0
-    N = len(T)
-    for i in range(0,N):
-        D += C[i]*T[i]**2/(1+ytm)**T[i]
-    D = D/pv
-    return D
-
-def price_fixed_rate_bond_from_ytm(ytm,T,C):
-    price = 0
-    N = len(T)
-    for i in range(0,N):
-        price += C[i]/(1+ytm)**T[i]
-    return price
-
-def ytm(pv,T,C,ytm_init = 0.05):
-    args = (pv, T, C, 1)
-    result = minimize(ytm_obj,ytm_init,args = args, options={'disp': False})
-    ytm = result.x[0]
-    return ytm
-
-def ytm_obj(ytm,pv,T,C,scaling = 1):
-    N = len(T)
-    pv_new = 0
-    for i in range(0,N):
-        pv_new += C[i]/(1+ytm[0])**T[i]
-    sse = scaling*(pv-pv_new)**2
-    return sse
 
 # Vasicek short rate model
 def zcb_price_vasicek(r0,a,b,sigma,T):
@@ -879,35 +879,6 @@ def caplet_prices_hwev(strike,a,sigma,T,p):
             price_caplet[i] = (1 + (T[i]-T[i-1])*strike[i])*euro_option_price_hwev(1/(1 + (T[i]-T[i-1])*strike[i]),T[i-1],T[i],p[i-1],p[i],a,sigma,type = "put")
     return price_caplet
 
-# Libor market model
-def drift_lmm(L,alpha,sigma,rho):
-    N = len(L)
-    drift = np.zeros(N)
-    for i in range(0,N-1):
-        for k in range(i+1,N):
-            drift[i] += alpha[k]*L[k]/(1+alpha[k]*L[k])*sigma[i]*sigma[k]*rho[i,k]
-    return drift
-
-def simul_lmm(L0,T,sigma,rho,M):
-    N = len(L0)
-    alpha = np.zeros(N)
-    for n in range(1,N):
-        alpha[n-1] = T[n] - T[n-1]
-    delta = T[1]*N/M
-    delta_sqrt = np.sqrt(delta)
-    log_L_simul = np.nan*np.ones([N,M+1])
-    log_L_simul[:,0] = np.log(L0)
-    stage = 0
-    Mps = int(M/N)
-    while stage < N:
-        Z = np.random.standard_normal([N-stage,Mps])
-        rho_sqrt = np.real(sqrtm(rho[stage:N,stage:N]))
-        for m in range(0,Mps):
-            drift = drift_lmm(log_L_simul[stage:N,stage*Mps+m],alpha[stage:N],sigma[stage:N],rho[stage:N,stage:N])
-            log_L_simul[stage:N,stage*Mps+m+1] = log_L_simul[stage:N,stage*Mps+m] - (0.5*sigma[stage:N]**2 + drift)*delta + delta_sqrt*sigma[stage:N]*np.matmul(rho_sqrt,Z[:,m])
-        stage += 1
-    return np.exp(log_L_simul)
-
 # Caplets
 def black_caplet_price(sigma,T,strike,alpha,p,L,type = "call"):
     d1 = (np.log(L/strike) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
@@ -964,6 +935,235 @@ def black_caplet_iv(C,T,strike,alpha,p,L,type = "call", iv0 = 0.2, max_iter = 20
         pass
     return iv
 
+# Libor market model
+def drift_lmm(L,alpha,sigma,rho):
+    N = len(L)
+    drift = np.zeros(N)
+    for i in range(0,N-1):
+        for k in range(i+1,N):
+            drift[i] += alpha[k]*L[k]/(1+alpha[k]*L[k])*sigma[i]*sigma[k]*rho[i,k]
+    return drift
+
+def simul_lmm(L0,T,sigma,rho,M):
+    N = len(L0)
+    alpha = np.zeros(N)
+    for n in range(1,N):
+        alpha[n-1] = T[n] - T[n-1]
+    delta = T[1]*N/M
+    delta_sqrt = np.sqrt(delta)
+    log_L_simul = np.nan*np.ones([N,M+1])
+    log_L_simul[:,0] = np.log(L0)
+    stage = 0
+    Mps = int(M/N)
+    while stage < N:
+        Z = np.random.standard_normal([N-stage,Mps])
+        rho_sqrt = np.real(sqrtm(rho[stage:N,stage:N]))
+        for m in range(0,Mps):
+            drift = drift_lmm(log_L_simul[stage:N,stage*Mps+m],alpha[stage:N],sigma[stage:N],rho[stage:N,stage:N])
+            log_L_simul[stage:N,stage*Mps+m+1] = log_L_simul[stage:N,stage*Mps+m] - (0.5*sigma[stage:N]**2 + drift)*delta + delta_sqrt*sigma[stage:N]*np.matmul(rho_sqrt,Z[:,m])
+        stage += 1
+    return np.exp(log_L_simul)
+
+# Swatiopns
+def black_swaption_price(sigma,T,K,S,R,type = "call"):
+    d1 = (np.log(R/K) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
+    d2 = (np.log(R/K) - 0.5*sigma**2*T)/(sigma*np.sqrt(T))
+    if type == 'put':
+        price = S*(K*ndtr(-d2) - R*ndtr(-d1))
+    else:
+        price = S*(R*ndtr(d1) - K*ndtr(d2))
+    return price
+
+def black_swaption_delta(sigma,T,K,S,R,type = "call"):
+    d1 = (np.log(R/K) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
+    # d2 = (np.log(R/K) - 0.5*sigma**2*T)/(sigma*np.sqrt(T))
+    if type == 'call':
+        # price = S*(R*ndtr(d1) - K*ndtr(d2))
+        delta = S*ndtr(d1)  # - price/R + S*(R*norm.pdf(d1) - K*norm.pdf(d2))/(R*sigma*np.sqrt(T))
+    return delta
+
+def black_swaption_gamma(sigma,T,K,S,R,type = "call"):
+    d1 = (np.log(R/K) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
+    d2 = (np.log(R/K) - 0.5*sigma**2*T)/(sigma*np.sqrt(T))
+    if type == 'call':
+        price = S*(R*ndtr(d1) - K*ndtr(d2))
+        gamma = (2/R**2)*price + (S/R)*(norm.pdf(d1)/(sigma*np.sqrt(T)) - 2*ndtr(d1))
+    return gamma
+
+def black_swaption_vega(sigma,T,K,S,R,type = "call"):
+    d1 = (np.log(R/K) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
+    if type == 'call':
+        vega = S*R*norm.pdf(d1) * np.sqrt(T)
+    return vega
+
+def black_swaption_theta(sigma,T,K,S,r,R,type = "call"):
+    d1 = (np.log(R/K) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
+    d2 = (np.log(R/K) - 0.5*sigma**2*T)/(sigma*np.sqrt(T))
+    if type == 'call':
+        price = S*(R*ndtr(d1) - K*ndtr(d2))
+        theta = r*price - S*R*sigma*norm.pdf(d1)/(2*np.sqrt(T))
+    return theta
+
+def black_swaption_iv(C,T,K,S,R,type = "call", iv0 = 0.2, max_iter = 1000, prec = 1.0e-10):
+    iv = iv0
+    for i in range(0,max_iter):
+        price = black_swaption_price(iv,T,K,S,R,type = "call")
+        vega = black_swaption_vega(iv,T,K,S,R,type = "call")
+        diff = C - price
+        if abs(diff) < prec:
+            return iv
+        iv += diff/vega
+    return iv
+
+# Swap Market Model
+def simul_smm(R0,T,sigma,rho,M,type = "regular"):
+    N = len(R0) - 1
+    delta = T[1]*(N+1)/M
+    delta_sqrt = np.sqrt(delta)
+    alpha = np.zeros(N+1)
+    for n in range(1,N+2):
+        alpha[n-1] = T[n] - T[n-1]
+    rho_sqrt = np.real(sqrtm(rho))
+    sigma = np.matmul(np.diag(sigma),rho_sqrt)
+    R_simul = np.nan*np.ones([N+1,M+1])
+    R_simul[:,0] = R0
+    stage = 0
+    Mps = int(M/(N+1))
+    while stage < N+1:
+        Z = np.random.standard_normal([N+1-stage,Mps])
+        rho_sqrt = np.real(sqrtm(rho[stage:,stage:]))
+        for m in range(1,Mps+1):
+            t = delta*(stage*Mps + m - 1)
+            alpha[stage] = T[stage+1] - t
+            drift = drift_smm(R_simul[stage:,stage*Mps],sigma[stage:,stage:],alpha[stage:])
+            R_simul[stage:,stage*Mps + m] = R_simul[stage:,stage*Mps + m-1] + drift*R_simul[stage:,stage*Mps + m-1]*delta + delta_sqrt*R_simul[stage:,stage*Mps + m-1]*np.matmul(sigma[stage:,stage:],Z[:,m-1])
+        stage += 1
+    return R_simul
+
+def matrix_swap_to_p(alpha,R):
+    N = len(R)
+    M = np.zeros([N,N])
+    for c in range(0,N):
+        M[0,c] = R[0]*alpha[c]
+    M[0,-1] += 1
+    for r in range(1,N):
+        M[r,r-1] = -1
+        for c in range(r,N):
+            M[r,c] = R[r]*alpha[c]
+        M[r,-1] += 1
+    return M
+
+def zcb_prices_from_swap_rates_normal_smm(T,R_swap):
+    N = len(R_swap)
+    alpha = np.zeros(N)
+    p = np.ones(N+1)
+    for n in range(1,N+1):
+        alpha[n-1] = T[n] - T[n-1]
+    X = matrix_swap_to_p(alpha,R_swap)
+    y = np.zeros([N])
+    y[0] = 1
+    p = np.linalg.solve(X,y)
+    return p
+
+def drift_smm(R,sigma,alpha):
+    N = len(R) - 1
+    drift = np.zeros([N+1])
+    X = matrix_swap_to_p(alpha,R)
+    y = np.zeros([N+1])
+    y[0] = 1
+    p = np.linalg.solve(X,y)
+    S = np.zeros(N+1)
+    for n in range(0,N+1):
+        for j in range(0,N+1-n):
+            S[n] += alpha[j]*p[j]
+    phi = np.zeros([N,N+1])
+    for n in range(0,N):
+        for j in range(0,N-1):
+            phi[n,:] += S[j+1]/S[n]*alpha[j+1]*R[j+1]*sigma[j+1,:]
+            for k in range(n+1,j+1):
+                phi[n] *= (1 + alpha[k]*R[k])
+        drift[n] = - np.dot(sigma[n,:],phi[n,:])
+    return drift
+
+# SABR model
+def sigma_sabr(K,T,F_0,sigma_0,beta,upsilon,rho):
+    if abs(F_0-K) < 1e-8:    # SABR ATM formula
+        sigma = sigma_0*F_0**(beta-1)*(1+(((1-beta)**2/24)*(sigma_0**2*(F_0)**(2*beta-2)) + (rho*beta*upsilon*sigma_0/4)*(F_0)**(beta-1) + (2-3*rho**2)/24*upsilon**2)*T)
+    else:
+        z = (upsilon/sigma_0)*(F_0*K)**((1-beta)/2)*np.log(F_0/K)
+        x = np.log((np.sqrt(1-2*rho*z+z**2) + z - rho)/(1-rho))
+        D = (F_0*K)**((1-beta)/(2))*(1 + ((1-beta)**2/24)*np.log2(F_0/K) + ((1-beta)**4/1920)*np.emath.logn(4,F_0/K))
+        A = 1 + (((1-beta)**2/24)*sigma_0**2*(F_0*K)**(beta-1) + (rho*beta*upsilon*sigma_0/4)*(F_0*K)**((beta-1)/2) + ((2-3*rho**2)/24)*upsilon**2)*T
+        sigma = (sigma_0/D)*(z/x)*A
+    return sigma
+
+def sabr_simul(F_0,sigma_0,beta,upsilon,rho,M,T,method = "euler"):
+    sigma, F = np.zeros([M+1]), np.zeros([M+1])
+    sigma[0], F[0] = sigma_0, F_0
+    delta = T/M
+    Z = np.random.standard_normal([2,M])
+    delta_sqrt = np.sqrt(delta)
+    rho_sqrt_help = np.sqrt(1-rho**2)
+    if method == "euler":
+        for m in range(1,M+1):
+            F[m] = F[m-1] + sigma[m-1]*F[m-1]**beta*delta_sqrt*Z[0,m-1]
+            if F[m] <= 0:
+                F[m] = F[m-1]
+            sigma[m] = sigma[m-1] + upsilon*sigma[m-1]*delta_sqrt*(rho*Z[0,m-1] + rho_sqrt_help*Z[1,m-1])
+    elif method == "milstein":
+        for m in range(1,M+1):
+            F[m] = F[m-1] + sigma[m-1]*F[m-1]**beta*delta_sqrt*Z[0,m-1] + 0.5*beta*sigma[m-1]**2*F[m-1]**(2*beta-1)*delta*(Z[0,m-1]**2-1)
+            if F[m] <= 0:
+                F[m] = F[m-1]
+            Z3 = rho*Z[0,m-1] + rho_sqrt_help*Z[1,m-1]
+            sigma[m] = sigma[m-1] + upsilon*sigma[m-1]*delta_sqrt*Z3 + 0.5*upsilon**2*sigma[m-1]*delta*(Z3**2-1)
+    return F, sigma
+
+def fit_sabr_obj(param,sigma_market,K,T,R):
+    sigma_0, beta, upsilon, rho = param
+    N = len(sigma_market)
+    sse = 0
+    for n in range(0,N):
+        sigma_model = sigma_sabr(K[n],T,R,sigma_0,beta,upsilon,rho)
+        sse += (sigma_market[n]-sigma_model)**2
+    return sse
+
+def fit_sabr_no_beta_obj(param,beta,sigma_market,K,T,R):
+    sigma_0, upsilon, rho = param
+    N = len(sigma_market)
+    sse = 0
+    for n in range(0,N):
+        sigma_model = sigma_sabr(K[n],T,R,sigma_0,beta,upsilon,rho)
+        sse += (sigma_market[n]-sigma_model)**2
+    return sse
+
+# Statistics
+def data_into_bins(data,N_bins,bin_min = "default",bin_max = "default"):
+    # Divide the data in a one-simensional np.array into N_bins bins of equal size.
+    N = len(data)
+    data = np.sort(data,kind = "stable")
+    if bin_min == "default":
+        bin_min = data[0]
+    if bin_max == "default":
+        bin_max = data[-1]
+    limits_bins = np.array([bin_min + i*(bin_max-bin_min)/N_bins for i in range(0,N_bins+1)])
+    freq = np.zeros([N_bins])
+    data_bins = []
+    i, j = 0, 0
+    while i < N_bins:
+        freq_temp = 0
+        data_temp = []
+        while data[j] <= limits_bins[i+1]:
+            data_temp.append(data[j])
+            freq_temp += 1
+            if j < N - 1:
+                j += 1
+            elif j == N - 1:
+                break
+        data_bins.append(np.array(data_temp))
+        freq[i] = freq_temp
+        i += 1
+    return np.array(data_bins), limits_bins, freq
 
 # Nelson-Siegel function
 def F_ns(param,T):
