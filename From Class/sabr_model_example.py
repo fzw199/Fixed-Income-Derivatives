@@ -3,34 +3,34 @@ from scipy.optimize import minimize
 import fixed_income_derivatives_E2025 as fid
 import matplotlib.pyplot as plt
 
-np.random.seed(11)
-alpha = 0.5
-T_max = 7
-r0, a, b, sigma_vasicek = 0.028, 0.6, 0.032, 0.036
-K_swaption_offset = [-300,-250,-200,-150,-100,-50,0,50,100,150,200,250,300]
-sigma_0, beta, upsilon, rho = 0.045, 0.55, 0.58,-0.34
-idx_exer, idx_mat = 4, 14
-N_swaption = len(K_swaption_offset)
-M = int(round(T_max/alpha)+1)
-T = np.array([i*alpha for i in range(0,M)])
-p = fid.zcb_price_vasicek(r0,a,b,sigma_vasicek,T)
-S_swap = 0
-for i in range(idx_exer+1,idx_set + 1):
-    S_swap += alpha*p[i]
-R_swap = (p[idx_exer] - p[idx_set])/S_swap
-print(S_swap,R_swap)
-iv_market, iv_check, price_market, K = np.zeros([N_swaption]), np.zeros([N_swaption]), np.zeros([N_swaption]), np.zeros([N_swaption])
-for i in range(0,N_swaption):
-    K[i] = R_swap + K_swaption_offset[i]/10000
-    iv_market[i] = fid.sigma_sabr(K[i],T[idx_exer],R_swap,sigma_0,beta,upsilon,rho,type = "call") + 0.0005*np.random.randn(1,1)
-    price_market[i] = fid.black_swaption_price(iv_market[i],T[idx_exer],K[i],S_swap,R_swap,type = "call")
-    iv_check[i] = fid.black_swaption_iv(price_market[i],T[idx_exer],K[i],S_swap,R_swap,type = "call", iv0 = 0.25, max_iter = 1000, prec = 1.0e-12)
-print(f"Zero coupon bond prices")
-print(p)
-print(f"Swaption market prices")
-print(price_market)
-print(f"Implied volatility from market prices")
-print(iv_market)
+# np.random.seed(11)
+# alpha = 0.5
+# T_max = 7
+# r0, a, b, sigma_vasicek = 0.028, 0.6, 0.032, 0.036
+# K_swaption_offset = [-300,-250,-200,-150,-100,-50,0,50,100,150,200,250,300]
+# sigma_0, beta, upsilon, rho = 0.045, 0.55, 0.58,-0.34
+# idx_exer, idx_mat = 4, 14
+# N_swaption = len(K_swaption_offset)
+# M = int(round(T_max/alpha)+1)
+# T = np.array([i*alpha for i in range(0,M)])
+# p = fid.zcb_price_vasicek(r0,a,b,sigma_vasicek,T)
+# S_swap = 0
+# for i in range(idx_exer+1,idx_set + 1):
+#     S_swap += alpha*p[i]
+# R_swap = (p[idx_exer] - p[idx_set])/S_swap
+# print(S_swap,R_swap)
+# iv_market, iv_check, price_market, K = np.zeros([N_swaption]), np.zeros([N_swaption]), np.zeros([N_swaption]), np.zeros([N_swaption])
+# for i in range(0,N_swaption):
+#     K[i] = R_swap + K_swaption_offset[i]/10000
+#     iv_market[i] = fid.sigma_sabr(K[i],T[idx_exer],R_swap,sigma_0,beta,upsilon,rho,type = "call") + 0.0005*np.random.randn(1,1)
+#     price_market[i] = fid.black_swaption_price(iv_market[i],T[idx_exer],K[i],S_swap,R_swap,type = "call")
+#     iv_check[i] = fid.black_swaption_iv(price_market[i],T[idx_exer],K[i],S_swap,R_swap,type = "call", iv0 = 0.25, max_iter = 1000, prec = 1.0e-12)
+# print(f"Zero coupon bond prices")
+# print(p)
+# print(f"Swaption market prices")
+# print(price_market)
+# print(f"Implied volatility from market prices")
+# print(iv_market)
 
 alpha = 0.5
 T_max = 7
