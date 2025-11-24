@@ -126,6 +126,10 @@ for i in range(0,N_simul_swaption):
     price_swaption_plot[i] = sum(price_swaption_simul[0:i+1])/(i+1)*10000
 print(f"price_swaption: {price_swaption_plot[-1]} bps")
 
+## price_swaption_explicit = fid.swaption_price_hwev(T_n,T_N,strike, "semiannual",F_star{0},n,a,sigma,T_inter,p_inter,f_star_t)*10000
+## print(f"price_swaption_explicit: {price_swaption_explicit} bps")
+# Virker nok ikke men sådan skrevet af fra hans gennemgang til forelæsningen 
+
 # Pricing a digital option
 strike = 0.06
 T_n, T_N, alpha = 1, 11, 0.5
