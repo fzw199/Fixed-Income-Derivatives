@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.stats import norm, ncx2
-from scipy.optimize import minimize, Bounds
+from scipy.optimize import minimize, root_scalar, Bounds
 from scipy.special import ndtr, gammainc
 from scipy.linalg import sqrtm
 from numpy.polynomial.hermite import hermfit, hermval, hermder
@@ -420,7 +420,7 @@ def fit_vasicek_obj(param,R_star,T,scaling = 1):
         sse += scaling*(R_fit[m] - R_star[m])**2
     return sse
 
-def fit_vasicek_no_sigma_obj(param,sigma,R_star,T,scaling = 1):
+def fit_vasicek_sigma_fixed_obj(param,sigma,R_star,T,scaling = 1):
     r0, a, b = param
     M = len(T)
     R_fit = spot_rate_vasicek(r0,a,b,sigma,T)
@@ -428,6 +428,63 @@ def fit_vasicek_no_sigma_obj(param,sigma,R_star,T,scaling = 1):
     for m in range(0,M):
         sse += scaling*(R_fit[m] - R_star[m])**2
     return sse
+
+def swaption_price_vasicek(T_n,T_N,strike,fixed_freq,r0,a,b,sigma,type_swap = None):
+    print(f"inside swaption_price")
+    swaption_price = 0
+    if type(fixed_freq) == str:
+        if fixed_freq == "quarterly":
+            alpha = 0.25
+            T_fix = np.zeros([int((T_N-T_n)*4) + 1])
+            T_swap = np.zeros([int((T_N-T_n)*4) + 1])
+            for i in range(0,int((T_N-T_n)*4) + 1):
+                T_fix[i] = T_n + i*alpha
+                T_swap[i] = i*alpha
+        elif fixed_freq == "semiannual":
+            alpha = 0.5
+            T_fix = np.zeros([int((T_N-T_n)*2) + 1])
+            T_swap = np.zeros([int((T_N-T_n)*2) + 1])
+            for i in range(0,int((T_N-T_n)*2) + 1):
+                T_fix[i] = T_n + i*alpha
+                T_swap[i] = i*alpha
+        elif fixed_freq == "annual":
+            alpha = 1
+            T_fix = np.zeros([int(T_N-T_n) + 1])
+            T_swap = np.zeros([int(T_N-T_n) + 1])
+            for i in range(0,int(T_N-T_n) + 1):
+                T_fix[i] = T_n + i
+                T_swap[i] = i
+    r_star = r_star_jams_vasicek(strike,a,b,sigma,T_swap)
+    print(f"r_star: {r_star}")
+    if type_swap == "payer":
+        N = len(T_fix)
+        p = zcb_price_vasicek(r0,a,b,sigma,T_fix)
+        for i in range(1,N-1):
+            p_star = zcb_price_vasicek(r_star,a,b,sigma,T_fix[i]-T_fix[0])
+            swaption_price += (T_fix[i]-T_fix[i-1])*strike*euro_option_price_vasicek(p_star,T_fix[0],T_fix[i],p[0],p[i],a,sigma,type = "put")
+        p_star = zcb_price_vasicek(r_star,a,b,sigma,T_fix[N-1]-T_fix[0])
+        swaption_price += (1+(T_fix[N-1]-T_fix[N-2])*strike)*euro_option_price_vasicek(p_star,T_fix[0],T_fix[N-1],p[0],p[N-1],a,sigma,type = "put")
+    elif type_swap == "receiver":
+        N = len(T_fix)
+        p = zcb_price_vasicek(r0,a,b,sigma,T_fix)
+        for i in range(1,N-1):
+            p_star = zcb_price_vasicek(r_star,a,b,sigma,T_fix[i]-T_fix[0])
+            swaption_price += (T_fix[i]-T_fix[i-1])*strike*euro_option_price_vasicek(p_star,T_fix[0],T_fix[i],p[0],p[i],a,sigma,type = "call")
+        p_star = zcb_price_vasicek(r_star,a,b,sigma,T_fix[N-1]-T_fix[0])
+        swaption_price += (1+(T_fix[N-1]-T_fix[N-2])*strike)*euro_option_price_vasicek(p_star,T_fix[0],T_fix[N-1],p[0],p[N-1],a,sigma,type = "call")
+    return swaption_price
+
+def swaption_payoff_vasicek(r,K,a,b,sigma,T):
+    N = len(T)
+    p = zcb_price_vasicek(r,a,b,sigma,T)
+    chi = 1 - p[-1]
+    for i in range(1,N):
+        chi -= K*(T[i]-T[i-1])*p[i]
+    return chi
+
+def r_star_jams_vasicek(K,a,b,sigma,T):
+    result = root_scalar(swaption_payoff_vasicek,args = (K,a,b,sigma,T), method = "bisect", bracket = [-0.1,0.3],options={'xtol': 1e-8,'disp': False})
+    return result.root
 
 # Cox-Ingersoll-Ross short rate model
 def zcb_price_cir(r0,a,b,sigma,T):
@@ -689,9 +746,9 @@ def zcb_price_ho_lee(t,T,r,sigma,T_star,p_star,f_star):
             p_T = for_values_in_list_find_value_return_value(T[i],T_star,p_star)
             p[i] = (p_T/p_t)*np.exp((T[i]-t)*(f_star-r) - (sigma**2/2)*t*(T[i]-t)**2)
     elif type(T) == int or type(T) == float or type(T) == np.int32 or type(T) == np.int64 or type(T) == np.float64:
-        p_t = for_values_in_list_find_value_return_value(t,T_star,p_star)
-        p_T = for_values_in_list_find_value_return_value(T,T_star,p_star)
-        p = (p_T/p_t)*np.exp((T-t)*(f_star-r) - (sigma**2/2)*t*(T-t)**2)
+        p_star_t = for_values_in_list_find_value_return_value(t,T_star,p_star)
+        p_star_T = for_values_in_list_find_value_return_value(T,T_star,p_star)
+        p = (p_star_T/p_star_t)*np.exp((T-t)*(f_star-r) - (sigma**2/2)*t*(T-t)**2)
     return np.array(p)
 
 def mean_var_ho_lee(f,sigma,T):
@@ -748,24 +805,33 @@ def ci_ho_lee(f,sigma,T,size_ci,type_ci = "two_sided"):
         lb,ub = False, False
     return lb, ub
 
-def simul_ho_lee(r0,f_T,sigma,T,method = "euler",f = None,seed = None):
+def simul_ho_lee(r0,t_simul,sigma,method = "exact",f = None,f_T = None,seed = None):
     if seed is not None:
         np.random.seed(seed)
-    M = len(f_T)
-    delta = T/M
-    delta_sqrt = np.sqrt(delta)
-    Z = np.random.standard_normal(M)
     if method == "exact":
-        r, W = np.zeros(M), np.zeros(M)
-        r[0] = r0
-        for m in range(1,M):
-            W[m] = W[m-1] + delta_sqrt*Z[m-1]
-            r[m] = f[m] + 0.5*sigma**2*(m*delta)**2 + sigma*W[m]
+        if f is None:
+            print(f"f must be supplied when simulating the Ho-Lee model using an exact scheme")
+        else:
+            M = len(t_simul) - 1
+            delta = t_simul[-1]/M
+            delta_sqrt = np.sqrt(delta)
+            Z = np.random.standard_normal(M)
+            r = np.zeros(M+1)
+            r[0] = r0
+            for m in range(1,M+1):
+                r[m] = r[m-1] + f[m] - f[m-1] + 0.5*sigma**2*(t_simul[m]**2 - t_simul[m-1]**2) + sigma*delta_sqrt*Z[m-1]
     elif method == "euler":
-        r = np.zeros(M)
-        r[0] = r0
-        for m in range(1,M):
-            r[m] = r[m-1] + (f_T[m-1] + sigma**2*(m-1)*delta)*delta + sigma*delta_sqrt*Z[m-1]
+        if f_T is None:
+            print(f"f_T must be supplied when simulating the Ho-Lee model using an Euler scheme")
+        else:
+            M = len(t_simul) - 1
+            delta = t_simul[-1]/M
+            delta_sqrt = np.sqrt(delta)
+            Z = np.random.standard_normal(M)
+            r = np.zeros(M+1)
+            r[0] = r0
+            for m in range(1,M+1):
+                r[m] = r[m-1] + (f_T[m-1] + sigma**2*t_simul[m-1])*delta + sigma*delta_sqrt*Z[m-1]
     return r
 
 def euro_option_price_ho_lee(K,T1,T2,p_T1,p_T2,sigma,type = "call"):
@@ -1166,24 +1232,6 @@ def data_into_bins(data,N_bins,bin_min = "default",bin_max = "default"):
     return np.array(data_bins), limits_bins, freq
 
 # Nelson-Siegel function
-def F_ns(param,T):
-    if type(T) == int or type(T) == float or type(T) == np.int32 or type(T) == np.int64 or type(T) == np.float64:
-        f_inf, a, b = param
-        K = len(a)
-        F = f_inf*T
-        for k in range(0,K):
-            F += a[k]*b[k]**(-k-1)*gammainc(k+1,b[k]*T)
-    elif type(T) == tuple or type(T) == list or type(T) == np.ndarray:
-        f_inf, a, b = param
-        K = len(a)
-        M = len(T)
-        F = np.zeros([M])
-        for m in range(0,M):
-            F[m] = f_inf*T[m]
-            for k in range(0,K):
-                F[m] += a[k]*b[k]**(-k-1)*gammainc(k+1,b[k]*T[m])
-    return F
-
 def f_ns(param,T):
     if type(T) == int or type(T) == float or type(T) == np.int32 or type(T) == np.int64 or type(T) == np.float64:
         f_inf, a, b = param
@@ -1201,6 +1249,42 @@ def f_ns(param,T):
             for k in range(0,K):
                 f[m] += a[k]*T[m]**k*np.exp(-b[k]*T[m])
     return f
+
+def f_ns_T(param,T):
+    if type(T) == int or type(T) == float or type(T) == np.float32 or type(T) == np.float64:
+        a, b = param
+        N = len(a)
+        f_T = -a[0]*b[0]*np.exp(-b[0]*T)
+        for n in range(1,N):
+            f_T += a[n]*n*T**(n-1)*np.exp(-b[n]*T) - a[n]*b[n]*T**n*np.exp(-b[n]*T)
+    elif type(T) == tuple or type(T) == list or type(T) == np.ndarray:
+        a, b = param
+        N = len(a)
+        M = len(T)
+        f_T = np.zeros([M])
+        for m in range(0,M):
+            f_T[m] = -a[0]*b[0]*np.exp(-b[0]*T[m])
+            for n in range(1,N):
+                f_T[m] += a[n]*n*T[m]**(n-1)*np.exp(-b[n]*T[m]) - a[n]*b[n]*T[m]**n*np.exp(-b[n]*T[m])
+    return f_T
+
+def F_ns(param,T):
+    if type(T) == int or type(T) == float or type(T) == np.int32 or type(T) == np.int64 or type(T) == np.float64:
+        f_inf, a, b = param
+        K = len(a)
+        F = f_inf*T
+        for k in range(0,K):
+            F += a[k]*b[k]**(-k-1)*gammainc(k+1,b[k]*T)
+    elif type(T) == tuple or type(T) == list or type(T) == np.ndarray:
+        f_inf, a, b = param
+        K = len(a)
+        M = len(T)
+        F = np.zeros([M])
+        for m in range(0,M):
+            F[m] = f_inf*T[m]
+            for k in range(0,K):
+                F[m] += a[k]*b[k]**(-k-1)*gammainc(k+1,b[k]*T[m])
+    return F
 
 def f_ns_jac(param,T):
     f_inf, a, b = param
@@ -1221,24 +1305,6 @@ def f_ns_hess(param,T):
         hess[1+N+1+n,1+n] = - T**(n+1)*np.exp(-b[n]*T)
         hess[1+N+1+n,1+N+1+n] = a[n]*T**(n+2)*np.exp(-b[n]*T)
     return hess
-
-def f_ns_T(param,T):
-    if type(T) == int or type(T) == float or type(T) == np.float32 or type(T) == np.float64:
-        a, b = param
-        N = len(a)
-        f_T = -a[0]*b[0]*np.exp(-b[0]*T)
-        for n in range(1,N):
-            f_T += a[n]*n*T**(n-1)*np.exp(-b[n]*T) - a[n]*b[n]*T**n*np.exp(-b[n]*T)
-    elif type(T) == tuple or type(T) == list or type(T) == np.ndarray:
-        a, b = param
-        N = len(a)
-        M = len(T)
-        f_T = np.zeros([M])
-        for m in range(0,M):
-            f_T[m] = -a[0]*b[0]*np.exp(-b[0]*T[m])
-            for n in range(1,N):
-                f_T[m] += a[n]*n*T[m]**(n-1)*np.exp(-b[n]*T[m]) - a[n]*b[n]*T[m]**n*np.exp(-b[n]*T[m])
-    return f_T
 
 def theta_ns(param,t):
     if type(t) == int or type(t) == float or type(t) == np.float32 or type(t) == np.float64:
