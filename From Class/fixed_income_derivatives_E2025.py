@@ -1007,7 +1007,8 @@ def drift_lmm(L,alpha,sigma,rho):
     drift = np.zeros(N)
     for i in range(0,N-1):
         for k in range(i+1,N):
-            drift[i] += alpha[k]*L[k]/(1+alpha[k]*L[k])*sigma[i]*sigma[k]*rho[i,k]
+   ''
+        drift[i] += alpha[k]*L[k]/(1+alpha[k]*L[k])*sigma[i]*sigma[k]*rho[i,k]
     return drift
 
 def simul_lmm(L0,T,sigma,rho,M):
