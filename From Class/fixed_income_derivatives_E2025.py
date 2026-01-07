@@ -7,22 +7,22 @@ from numpy.polynomial.hermite import hermfit, hermval, hermder
 import copy
 
 # Conversions between ZCB prices, spot rates forward rates and libor rates
-def zcb_prices_from_spot_rates(T,R,type = "continuous"):
+def zcb_prices_from_spot_rates(T,R,method = "continuous"):
     M = len(T)
     p = np.zeros([M])
-    if type == "continuous":
+    if method == "continuous":
         for i in range(0,M):
             if T[i] < 1e-10:
                 p[i] = 1
             else:
                 p[i] = np.exp(-R[i]*T[i])
-    elif type == "simple":
+    elif method == "simple":
         for i in range(0,M):
             if T[i] < 1e-10:
                 p[i] = 1
             else:
                 p[i] = 1/(1+R[i]*T[i])
-    elif type == "discrete":
+    elif method == "discrete":
         for i in range(0,M):
             if T[i] < 1e-10:
                 p[i] = 1
@@ -30,22 +30,22 @@ def zcb_prices_from_spot_rates(T,R,type = "continuous"):
                 p[i] = 1/(1+R[i])**T[i]
     return p
 
-def spot_rates_from_zcb_prices(T,p,type = "continuous"):
+def spot_rates_from_zcb_prices(T,p,method = "continuous"):
     M = len(T)
     R = np.zeros([M])
-    if type == "continuous":
+    if method == "continuous":
         for i in range(0,M):
             if T[i] < 1e-10:
                 R[i] = np.nan
             else:
                 R[i] = -np.log(p[i])/T[i]
-    elif type == "simple":
+    elif method == "simple":
         for i in range(0,M):
             if T[i] < 1e-10:
                 R[i] = np.nan
             else:
                 R[i] = (1-p[i])/(T[i]*p[i])
-    elif type == "discrete":
+    elif method == "discrete":
         for i in range(0,M):
             if T[i] < 1e-10:
                 R[i] = np.nan
@@ -53,11 +53,11 @@ def spot_rates_from_zcb_prices(T,p,type = "continuous"):
                 R[i] = p[i]**(-1/T[i]) - 1
     return R
 
-def forward_rates_from_zcb_prices(T,p,horizon = 1,type = "continuous"):
+def forward_rates_from_zcb_prices(T,p,horizon = 1,method = "continuous"):
     # horizon = 0 corresponds to approximated instantaneous forward rates.
     M = len(T)
     f = np.nan*np.ones([M])
-    if type == "continuous":
+    if method == "continuous":
         if horizon == 0:
             f[0] = (np.log(p[0])-np.log(p[1]))/(T[1]-T[0])
             f[-1] = (np.log(p[-2])-np.log(p[-1]))/(T[-1]-T[-2])
@@ -70,7 +70,7 @@ def forward_rates_from_zcb_prices(T,p,horizon = 1,type = "continuous"):
             while i < M - 0.5:
                 f[i] = (np.log(p[i-horizon])-np.log(p[i]))/(T[i]-T[i-horizon])
                 i += 1
-    elif type == "simple":
+    elif method == "simple":
         if horizon == 0:
             f[0] = (p[0] - p[1])/(p[1]*(T[1]-T[0]))
             f[-1] = (p[-2] - p[-1])/(p[-1]*(T[-1]-T[-2]))
@@ -83,7 +83,7 @@ def forward_rates_from_zcb_prices(T,p,horizon = 1,type = "continuous"):
             while i < M - 0.5:
                 f[i] = (p[i-horizon] - p[i])/(p[i]*(T[i]-T[i-horizon]))
                 i += 1
-    elif type == "discrete":
+    elif method == "discrete":
         if horizon == 0:
             f[0] = (p[0]/p[1])**(1/(T[1]-T[0])) - 1
             f[-1] = (p[-2]/p[-1])**(1/(T[-1]-T[-2])) - 1
@@ -98,7 +98,80 @@ def forward_rates_from_zcb_prices(T,p,horizon = 1,type = "continuous"):
                 i += 1
     return f
 
+# Bumping ZCB spot rates or market rates
+def spot_rate_bump(T_bump,size_bump,T,R_input,p_input):
+    R, p = R_input.copy(), p_input.copy()
+    if type(T_bump) == int or type(T_bump) == float or type(T_bump) == np.float64 or type(T_bump) == np.int32 or type(T_bump) == np.int64:
+        I_bump, idx_bump = value_in_list_returns_I_idx(T_bump,T)
+        R[idx_bump] = R[idx_bump] + size_bump
+        p[idx_bump] = np.exp(-R[idx_bump]*T_bump)
+    elif type(T_bump) == tuple or type(T_bump) == list or type(T_bump) == np.ndarray:
+        if type(size_bump) == int or type(size_bump) == float or type(size_bump) == np.float64:
+            for i in range(0,len(T_bump)):
+                I_bump, idx_bump = value_in_list_returns_I_idx(T_bump[i],T)
+                R[idx_bump] = R[idx_bump] + size_bump
+                p[idx_bump] = np.exp(-R[idx_bump]*T_bump[i])
+        elif type(size_bump) == tuple or type(size_bump) == list or type(size_bump) == np.ndarray:
+            for i in range(0,len(T_bump)):
+                I_bump, idx_bump = value_in_list_returns_I_idx(T_bump[i],T)
+                R[idx_bump] = R[idx_bump] + size_bump[i]
+                p[idx_bump] = np.exp(-R[idx_bump]*T_bump[i])
+    return R, p
+
+def market_rate_bump(idx_bump,size_bump,T_inter,data,interpolation_options = {"method": "linear"}):
+    data_bump = copy.deepcopy(data)
+    if type(idx_bump) == int or type(idx_bump) == float or type(idx_bump) == np.float64 or type(idx_bump) == np.int32 or type(idx_bump) == np.int64:
+        data_bump[idx_bump]["rate"] += size_bump
+        T_fit_bump, R_fit_bump = zcb_curve_fit(data_bump,interpolation_options = interpolation_options)
+        p_inter_bump, R_inter_bump, f_inter_bump, T_inter_bump = zcb_curve_interpolate(T_inter,T_fit_bump,R_fit_bump,interpolation_options = interpolation_options)
+    elif type(idx_bump) == tuple or type(idx_bump) == list or type(idx_bump) == np.ndarray:
+        if type(size_bump) == int or type(size_bump) == float or type(size_bump) == np.float64 or type(size_bump) == np.int32 or type(size_bump) == np.int64:
+            for i in range(0,len(idx_bump)):
+                data_bump[idx_bump[i]]["rate"] += size_bump
+            T_fit_bump, R_fit_bump = zcb_curve_fit(data_bump,interpolation_options = interpolation_options)
+            p_inter_bump, R_inter_bump, f_inter_bump, T_inter_bump = zcb_curve_interpolate(T_inter,T_fit_bump,R_fit_bump,interpolation_options = interpolation_options)
+        elif type(size_bump) == tuple or type(size_bump) == list or type(size_bump) == np.ndarray:
+            for i in range(0,len(idx_bump)):
+                data_bump[idx_bump[i]]["rate"] += size_bump[i]
+            T_fit_bump, R_fit_bump = zcb_curve_fit(data_bump,interpolation_options = interpolation_options)
+            p_inter_bump, R_inter_bump, f_inter_bump, T_inter_bump = zcb_curve_interpolate(T_inter,T_fit_bump,R_fit_bump,interpolation_options = interpolation_options)
+    return p_inter_bump, R_inter_bump, f_inter_bump, T_inter_bump, data_bump
+
 # Fixed rate bond
+def price_fixed_rate_bond(t,C,M,K,fixed_freq,T,p):
+    # t:=           Present time (usually set to t=0) in years
+    # C:=           Annualixzed simple coupon rate
+    # M:=           Maturity of the bond in years
+    # K :=          Principal
+    # fixed_freq := Frequency of coupon paymenys ("annual", "semiannual", "quarterly")
+    # T :=          Maturities of the zero coupon bond prices used when pricing the fixed rate coupon bond
+    # p :=          Zero coupon bond prices corresponding to T
+    # NOTE! If t is a coupon date, it is assumed that the coupon at t should NOT be included in the price of the fixed rate coupon bond.
+    T_coupon = []
+    if fixed_freq == "quarterly":
+        alpha = 0.25
+        for n in range(1,int(4*M)+1):
+            if t < n*alpha <= M:
+                T_coupon.append(n*alpha)
+    elif fixed_freq == "semiannual":
+        alpha = 0.5
+        for n in range(1,int(2*M)+1):
+            if t < n*alpha <= M:
+                T_coupon.append(n*alpha)
+    elif fixed_freq == "annual":
+        alpha = 1
+        for n in range(1,int(M)+1):
+            if t < n*alpha <= M:
+                T_coupon.append(n*alpha)
+    p_coupon = for_values_in_list_find_value_return_value(T_coupon,T,p)
+    price = 0
+    for i in range(0,len(p_coupon)):
+        price += p_coupon[i]*alpha*C*K
+    price += p_coupon[-1]*K
+
+
+    return price
+
 def macauley_duration(pv,T,C,ytm):
     D = 0
     N = len(T)
@@ -391,13 +464,15 @@ def simul_vasicek(r0,a,b,sigma,M,T,method = "exact",seed = None):
             r[m] = r[m-1] + (b-a*r[m-1])*delta + sigma*delta_sqrt*Z[m-1]
     return r
 
-def euro_option_price_vasicek(K,T1,T2,p_T1,p_T2,a,sigma,type = "call"):
+def euro_option_price_vasicek(K,T1,T2,p_T1,p_T2,a,sigma,type_option = "call"):
     sigma_p = (sigma/a)*(1-np.exp(-a*(T2-T1)))*np.sqrt((1-np.exp(-2*a*T1))/(2*a))
     d1 = (np.log(p_T2/(p_T1*K)))/sigma_p + 0.5*sigma_p
     d2 = d1 - sigma_p
-    if type == "call":
+    if type_option == "call":
+        # print(f"        Vasicek Q1: {ndtr(d2)}, Q2: {ndtr(d1)}, K: {K}")
         price = p_T2*ndtr(d1) - p_T1*K*ndtr(d2)
-    elif type == "put":
+    elif type_option == "put":
+        # print(f"        Vasicek Q1: {ndtr(-d2)}, Q2: {ndtr(-d1)}, K: {K}")
         price = p_T1*K*ndtr(-d2) - p_T2*ndtr(-d1)
     return price
 
@@ -430,7 +505,6 @@ def fit_vasicek_sigma_fixed_obj(param,sigma,R_star,T,scaling = 1):
     return sse
 
 def swaption_price_vasicek(T_n,T_N,strike,fixed_freq,r0,a,b,sigma,type_swap = None):
-    print(f"inside swaption_price")
     swaption_price = 0
     if type(fixed_freq) == str:
         if fixed_freq == "quarterly":
@@ -455,40 +529,39 @@ def swaption_price_vasicek(T_n,T_N,strike,fixed_freq,r0,a,b,sigma,type_swap = No
                 T_fix[i] = T_n + i
                 T_swap[i] = i
     r_star = r_star_jams_vasicek(strike,a,b,sigma,T_swap)
-    print(f"r_star: {r_star}")
     if type_swap == "payer":
         N = len(T_fix)
         p = zcb_price_vasicek(r0,a,b,sigma,T_fix)
         for i in range(1,N-1):
-            p_star = zcb_price_vasicek(r_star,a,b,sigma,T_fix[i]-T_fix[0])
-            swaption_price += (T_fix[i]-T_fix[i-1])*strike*euro_option_price_vasicek(p_star,T_fix[0],T_fix[i],p[0],p[i],a,sigma,type = "put")
-        p_star = zcb_price_vasicek(r_star,a,b,sigma,T_fix[N-1]-T_fix[0])
-        swaption_price += (1+(T_fix[N-1]-T_fix[N-2])*strike)*euro_option_price_vasicek(p_star,T_fix[0],T_fix[N-1],p[0],p[N-1],a,sigma,type = "put")
+            p_strike = zcb_price_vasicek(r_star,a,b,sigma,T_fix[i]-T_fix[0])
+            swaption_price += (T_fix[i]-T_fix[i-1])*strike*euro_option_price_vasicek(p_strike,T_fix[0],T_fix[i],p[0],p[i],a,sigma,type = "put")
+        p_strike = zcb_price_vasicek(r_star,a,b,sigma,T_fix[N-1]-T_fix[0])
+        swaption_price += (1+(T_fix[N-1]-T_fix[N-2])*strike)*euro_option_price_vasicek(p_strike,T_fix[0],T_fix[N-1],p[0],p[N-1],a,sigma,type = "put")
     elif type_swap == "receiver":
         N = len(T_fix)
         p = zcb_price_vasicek(r0,a,b,sigma,T_fix)
         for i in range(1,N-1):
-            p_star = zcb_price_vasicek(r_star,a,b,sigma,T_fix[i]-T_fix[0])
-            swaption_price += (T_fix[i]-T_fix[i-1])*strike*euro_option_price_vasicek(p_star,T_fix[0],T_fix[i],p[0],p[i],a,sigma,type = "call")
-        p_star = zcb_price_vasicek(r_star,a,b,sigma,T_fix[N-1]-T_fix[0])
-        swaption_price += (1+(T_fix[N-1]-T_fix[N-2])*strike)*euro_option_price_vasicek(p_star,T_fix[0],T_fix[N-1],p[0],p[N-1],a,sigma,type = "call")
+            p_strike = zcb_price_vasicek(r_star,a,b,sigma,T_fix[i]-T_fix[0])
+            swaption_price += (T_fix[i]-T_fix[i-1])*strike*euro_option_price_vasicek(p_strike,T_fix[0],T_fix[i],p[0],p[i],a,sigma,type = "call")
+        p_strike = zcb_price_vasicek(r_star,a,b,sigma,T_fix[N-1]-T_fix[0])
+        swaption_price += (1+(T_fix[N-1]-T_fix[N-2])*strike)*euro_option_price_vasicek(p_strike,T_fix[0],T_fix[N-1],p[0],p[N-1],a,sigma,type = "call")
     return swaption_price
 
-def swaption_payoff_vasicek(r,K,a,b,sigma,T):
-    N = len(T)
-    p = zcb_price_vasicek(r,a,b,sigma,T)
+def swaption_payoff_vasicek(r,K,a,b,sigma,T_swap):
+    N = len(T_swap)
+    p = zcb_price_vasicek(r,a,b,sigma,T_swap)
     chi = 1 - p[-1]
     for i in range(1,N):
-        chi -= K*(T[i]-T[i-1])*p[i]
+        chi -= K*(T_swap[i]-T_swap[i-1])*p[i]
     return chi
 
-def r_star_jams_vasicek(K,a,b,sigma,T):
-    result = root_scalar(swaption_payoff_vasicek,args = (K,a,b,sigma,T), method = "bisect", bracket = [-0.1,0.3],options={'xtol': 1e-8,'disp': False})
+def r_star_jams_vasicek(K,a,b,sigma,T_swap):
+    result = root_scalar(swaption_payoff_vasicek,args = (K,a,b,sigma,T_swap), method = "bisect", bracket = [-0.1,0.3],options={'xtol': 1e-8,'disp': False})
     return result.root
 
 # Cox-Ingersoll-Ross short rate model
 def zcb_price_cir(r0,a,b,sigma,T):
-    if type(T) == int or type(T) == float or type(T) == np.float32 or type(T) == np.float64:
+    if type(T) == int or type(T) == float or type(T) == np.int32 or type(T) == np.float32 or type(T) == np.float64:
         gamma = np.sqrt(a**2+2*sigma**2)
         D = (gamma+a)*(np.exp(gamma*T)-1)+2*gamma
         A = ((2*gamma*np.exp(0.5*T*(a+gamma)))/D)**((2*a*b)/(sigma**2))
@@ -507,6 +580,18 @@ def zcb_price_cir(r0,a,b,sigma,T):
         print(f"T not a recognized type")
         p = False
     return p
+
+def A_cir(a,b,sigma,T):
+    gamma = np.sqrt(a**2+2*sigma**2)
+    D = (gamma+a)*(np.exp(gamma*T)-1)+2*gamma
+    A = ((2*gamma*np.exp(0.5*T*(a+gamma)))/D)**((2*a*b)/(sigma**2))
+    return A
+
+def B_cir(a,b,sigma,T):
+    gamma = np.sqrt(a**2+2*sigma**2)
+    D = (gamma+a)*(np.exp(gamma*T)-1)+2*gamma
+    B = 2*(np.exp(gamma*T)-1)/D
+    return B
 
 def spot_rate_cir(r0,a,b,sigma,T):
     if type(T) == int or type(T) == float or type(T) == np.float64:
@@ -690,6 +775,8 @@ def simul_cir(r0,a,b,sigma,M,T,method = "exact",seed = None):
                 r[m] = r[m-1]
     return r
 
+
+
 def fit_cir_obj(param,R_star,T,scaling = 1):
     r0, a, b, sigma = param
     M = len(T)
@@ -834,13 +921,13 @@ def simul_ho_lee(r0,t_simul,sigma,method = "exact",f = None,f_T = None,seed = No
                 r[m] = r[m-1] + (f_T[m-1] + sigma**2*t_simul[m-1])*delta + sigma*delta_sqrt*Z[m-1]
     return r
 
-def euro_option_price_ho_lee(K,T1,T2,p_T1,p_T2,sigma,type = "call"):
+def euro_option_price_ho_lee(K,T1,T2,p_T1,p_T2,sigma,type_option = "call"):
     sigma_p = sigma*(T2-T1)*np.sqrt(T1)
     d1 = (np.log(p_T2/(p_T1*K)))/sigma_p + 0.5*sigma_p
     d2 = d1 - sigma_p
-    if type == "call":
+    if type_option == "call":
         price = p_T2*ndtr(d1) - p_T1*K*ndtr(d2)
-    elif type == "put":
+    elif type_option == "put":
         price = p_T1*K*ndtr(-d2) - p_T2*ndtr(-d1)
     return price
 
@@ -878,7 +965,6 @@ def zcb_price_hwev(t,T,r,a,sigma,T_star,p_star,f_star):
         p_t = for_values_in_list_find_value_return_value(t,T_star,p_star)
         p_T = for_values_in_list_find_value_return_value(T,T_star,p_star)
         B = (1-np.exp(-a*(T-t)))/a
-
         p = (p_T/p_t)*np.exp(B*(f_star-r) - (sigma**2/(4*a))*B**2*(1-np.exp(-2*a*t)))
     return np.array(p)
 
@@ -925,13 +1011,13 @@ def simul_hwev(r0,t,theta,a,sigma,method = "euler",seed = None):
             r[m] = r[m-1] + (theta[m-1] - a*r[m-1])*delta + sigma*delta_sqrt*Z[m-1]
     return r
 
-def euro_option_price_hwev(K,T1,T2,p_T1,p_T2,a,sigma,type = "call"):
+def euro_option_price_hwev(K,T1,T2,p_T1,p_T2,a,sigma,type_option = "call"):
     sigma_p = (sigma/a)*(1-np.exp(-a*(T2-T1)))*np.sqrt((1-np.exp(-2*a*T1))/(2*a))
     d1 = (np.log(p_T2/(p_T1*K)))/sigma_p + 0.5*sigma_p
     d2 = d1 - sigma_p
-    if type == "call":
+    if type_option == "call":
         price = p_T2*ndtr(d1) - p_T1*K*ndtr(d2)
-    elif type == "put":
+    elif type_option == "put":
         price = p_T1*K*ndtr(-d2) - p_T2*ndtr(-d1)
     return price
 
@@ -945,59 +1031,109 @@ def caplet_prices_hwev(strike,a,sigma,T,p):
             price_caplet[i] = (1 + (T[i]-T[i-1])*strike[i])*euro_option_price_hwev(1/(1 + (T[i]-T[i-1])*strike[i]),T[i-1],T[i],p[i-1],p[i],a,sigma,type = "put")
     return price_caplet
 
+def swaption_price_hwev(T_n,T_N,strike,fixed_freq,r0,a,sigma,T_star,p_star,f_star,type_swap = None):
+    swaption_price = 0
+    if type(fixed_freq) == str:
+        if fixed_freq == "quarterly":
+            alpha = 0.25
+            T_fix = np.zeros([int((T_N-T_n)*4) + 1])
+            for i in range(0,int((T_N-T_n)*4) + 1):
+                T_fix[i] = T_n + i*alpha
+        elif fixed_freq == "semiannual":
+            alpha = 0.5
+            T_fix = np.zeros([int((T_N-T_n)*2) + 1])
+            for i in range(0,int((T_N-T_n)*2) + 1):
+                T_fix[i] = T_n + i*alpha
+        elif fixed_freq == "annual":
+            alpha = 1
+            T_fix = np.zeros([int(T_N-T_n) + 1])
+            for i in range(0,int(T_N-T_n) + 1):
+                T_fix[i] = T_n + i
+    f_star_swaption = for_values_in_list_find_value_return_value(0,T_star,f_star,precision = 10e-8)
+    r_star = r_star_jams_hwev(strike,a,sigma,T_star,p_star,f_star_swaption,T_fix)
+    if type_swap == "payer":
+        N = len(T_fix)
+        p = for_values_in_list_find_value_return_value(T_fix,T_star,p_star)
+        for i in range(1,N-1):
+            p_strike = zcb_price_hwev(T_fix[0],T_fix[i],r_star,a,sigma,T_star,p_star,f_star_swaption)
+            swaption_price += (T_fix[i]-T_fix[i-1])*strike*euro_option_price_hwev(p_strike,T_fix[0],T_fix[i],p[0],p[i],a,sigma,type = "put")
+        p_strike = zcb_price_hwev(T_fix[0],T_fix[N-1],r_star,a,sigma,T_star,p_star,f_star_swaption)
+        swaption_price += (1+(T_fix[N-1]-T_fix[N-2])*strike)*euro_option_price_hwev(p_strike,T_fix[0],T_fix[N-1],p[0],p[N-1],a,sigma,type = "put")
+    elif type_swap == "receiver":
+        N = len(T_fix)
+        p = zcb_price_hwev(0,T_fix,r0,a,sigma,T_star,p_star,f_star_swaption)
+        for i in range(1,N-1):
+            p_strike = zcb_price_hwev(T_fix[0],T_fix[i],r_star,a,sigma,T_star,p_star,f_star_swaption)
+            swaption_price += (T_fix[i]-T_fix[i-1])*strike*euro_option_price_hwev(p_strike,T_fix[0],T_fix[i],p[0],p[i],a,sigma,type = "call")
+        p_strike = zcb_price_hwev(T_fix[0],T_fix[N-1],r_star,a,sigma,T_star,p_star,f_star_swaption)
+        swaption_price += (1+(T_fix[N-1]-T_fix[N-2])*strike)*euro_option_price_hwev(p_strike,T_fix[0],T_fix[N-1],p[0],p[N-1],a,sigma,type = "call")
+    return swaption_price
+
+def swaption_payoff_hwev(r,K,a,sigma,T_star,p_star,f_star,T_fix):
+    N = len(T_fix)
+    p = zcb_price_hwev(T_fix[0],T_fix,r,a,sigma,T_star,p_star,f_star)
+    chi = 1 - p[-1]
+    for i in range(1,N):
+        chi -= K*(T_fix[i]-T_fix[i-1])*p[i]
+    return chi
+
+def r_star_jams_hwev(K,a,sigma,T_star,p_star,f_star,T_fix):
+    result = root_scalar(swaption_payoff_hwev,args = (K,a,sigma,T_star,p_star,f_star,T_fix), method = "bisect", bracket = [-0.1,0.3],options={'xtol': 1e-8,'disp': False})
+    return result.root
+
 # Caplets
-def black_caplet_price(sigma,T,strike,alpha,p,L,type = "call"):
+def black_caplet_price(sigma,T,strike,alpha,p,L,type_option = "call"):
     d1 = (np.log(L/strike) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
     d2 = (np.log(L/strike) - 0.5*sigma**2*T)/(sigma*np.sqrt(T))
-    if type == 'put':
+    if type_option == 'put':
         price = alpha*p*(strike*ndtr(-d2) - L*ndtr(-d1))
     else:
         price = alpha*p*(L*ndtr(d1) - strike*ndtr(d2))
     return price
 
-def black_caplet_delta(sigma,T,strike,alpha,p,L,type = "call"):
+def black_caplet_delta(sigma,T,strike,alpha,p,L,type_option = "call"):
     d1 = (np.log(L/strike) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
     d2 = (np.log(L/strike) - 0.5*sigma**2*T)/(sigma*np.sqrt(T))
-    if type == "call":
+    if type_option == "call":
         # p_prev = p*(1+alpha*L)
         price = alpha*p*(L*ndtr(d1) - strike*ndtr(d2))
         delta = alpha*p*ndtr(d1) - alpha/(1+alpha*L)*price
     return delta
 
-def black_caplet_gamma(sigma,T,strike,alpha,p,L,type = "call"):
+def black_caplet_gamma(sigma,T,strike,alpha,p,L,type_option = "call"):
     d1 = (np.log(L/strike) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
     d2 = (np.log(L/strike) - 0.5*sigma**2*T)/(sigma*np.sqrt(T))
-    if type == "call":
+    if type_option == "call":
         gamma = alpha*p*(norm.pdf(d1)/(L*sigma*np.sqrt(T))-2*alpha/((1+alpha*L)**2)*(alpha*strike*ndtr(d2) + ndtr(d1)))
     return gamma
 
-def black_caplet_vega(sigma,T,strike,alpha,p,L,type = "call"):
-    if type == "call":
+def black_caplet_vega(sigma,T,strike,alpha,p,L,type_option = "call"):
+    if type_option == "call":
         d1 = (np.log(L/strike) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
         vega = alpha*p*L*norm.pdf(d1) * np.sqrt(T)
     return vega
 
-def black_caplet_theta(sigma,T,r,strike,alpha,p,L,type = "call"):
+def black_caplet_theta(sigma,T,r,strike,alpha,p,L,type_option = "call"):
     d1 = (np.log(L/strike) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
     d2 = (np.log(L/strike) - 0.5*sigma**2*(T-alpha))/(sigma*np.sqrt(T-alpha))
     price = alpha*p*(L*ndtr(d1) - strike*ndtr(d2))
-    if type == "call":
+    if type_option == "call":
         # p_prev = p*(1+alpha*L)
         price = alpha*p*(L*ndtr(d1) - strike*ndtr(d2))
         theta = r*price - alpha*p*(sigma*L*norm.pdf(d1))/(2*np.sqrt(T))
     return theta
 
-def black_caplet_iv(C,T,strike,alpha,p,L,type = "call", iv0 = 0.2, max_iter = 200, prec = 1e-10):
-    if type == "call":
+def black_caplet_iv(C,T,strike,alpha,p,L,type_option = "call", iv0 = 0.2, max_iter = 200, prec = 1e-10):
+    if type_option == "call":
         iv = iv0
         for i in range(0,max_iter):
-            price = black_caplet_price(iv,T,strike,alpha,p,L,type = "call")
-            vega = black_caplet_vega(iv,T,strike,alpha,p,L,type = "call")
+            price = black_caplet_price(iv,T,strike,alpha,p,L,type_option = "call")
+            vega = black_caplet_vega(iv,T,strike,alpha,p,L,type_option = "call")
             diff = C - price
             if abs(diff) < prec:
                 return iv
             iv += diff/vega
-    elif type == "put":
+    elif type_option == "put":
         pass
     return iv
 
@@ -1007,75 +1143,122 @@ def drift_lmm(L,alpha,sigma,rho):
     drift = np.zeros(N)
     for i in range(0,N-1):
         for k in range(i+1,N):
-   ''
-        drift[i] += alpha[k]*L[k]/(1+alpha[k]*L[k])*sigma[i]*sigma[k]*rho[i,k]
+            drift[i] += alpha*L[k]/(1+alpha*L[k])*sigma[i]*sigma[k]*rho[i,k]
     return drift
 
-def simul_lmm(L0,T,sigma,rho,M):
+def simul_lmm(L0,T,iv,rho,Mps,method_sigma = "constant",seed = None):
+    # Mps := Number of steps to take per stage where each stage is of length alpha.
+    if seed is not None:
+        np.seed = seed
     N = len(L0)
-    alpha = np.zeros(N)
-    for n in range(1,N):
-        alpha[n-1] = T[n] - T[n-1]
-    delta = T[1]*N/M
+    alpha = T[N] - T[N-1]
+    delta = alpha/Mps
     delta_sqrt = np.sqrt(delta)
-    log_L_simul = np.nan*np.ones([N,M+1])
-    log_L_simul[:,0] = np.log(L0)
-    stage = 0
-    Mps = int(M/N)
-    while stage < N:
-        Z = np.random.standard_normal([N-stage,Mps])
-        rho_sqrt = np.real(sqrtm(rho[stage:N,stage:N]))
-        for m in range(0,Mps):
-            drift = drift_lmm(log_L_simul[stage:N,stage*Mps+m],alpha[stage:N],sigma[stage:N],rho[stage:N,stage:N])
-            log_L_simul[stage:N,stage*Mps+m+1] = log_L_simul[stage:N,stage*Mps+m] - (0.5*sigma[stage:N]**2 + drift)*delta + delta_sqrt*sigma[stage:N]*np.matmul(rho_sqrt,Z[:,m])
-        stage += 1
+    # N_stage = int(T_simul/alpha)
+    if method_sigma == "constant":
+        sigma = np.nan*np.ones([N])
+        for n in range(0,N):
+            sigma[n] = np.sqrt(T[n+1]/T[n])*iv[n]
+        # print(f"L0: {L0}, T: {T}, sigma: {sigma}, Mps: {Mps}, alpha: {alpha}, delta: {delta}")
+        log_L_simul = np.nan*np.ones([N,int(T[-2]/delta)+1])
+        log_L_simul[:,0] = np.log(L0)
+        stage = 0
+        while stage < N:
+            Z = np.random.standard_normal([N-stage,Mps])
+            rho_sqrt = np.real(sqrtm(rho[stage:N,stage:N]))
+            for m in range(0,Mps):
+                drift = drift_lmm(log_L_simul[stage:N,stage*Mps+m],alpha,sigma[stage:N],rho[stage:N,stage:N])
+                log_L_simul[stage:N,stage*Mps+m+1] = log_L_simul[stage:N,stage*Mps+m] - (0.5*sigma[stage:N]**2 + drift)*delta + delta_sqrt*sigma[stage:N]*np.matmul(rho_sqrt,Z[:,m])
+            stage += 1
+    elif method_sigma == "step_wise_constant_regular":
+        sigma = np.nan*np.ones([N])
+        y = iv**2*T[1:]
+        A = alpha*np.tri(N)
+        beta_sq = (np.linalg.solve(A,y))
+        sigma = np.sqrt(beta_sq)
+        log_L_simul = np.nan*np.ones([N,int(T[-2]/delta)+1])
+        log_L_simul[:,0] = np.log(L0)
+        stage = 0
+        while stage < N:
+            Z = np.random.standard_normal([N-stage,Mps])
+            rho_sqrt = np.real(sqrtm(rho[stage:N,stage:N]))
+            for m in range(0,Mps):
+                drift = drift_lmm(log_L_simul[stage:N,stage*Mps+m],alpha,sigma[stage]*np.ones([N-stage]),rho[stage:N,stage:N])
+                log_L_simul[stage:N,stage*Mps+m+1] = log_L_simul[stage:N,stage*Mps+m] - (0.5*sigma[stage:N]**2 + drift)*delta + delta_sqrt*sigma[stage:N]*np.matmul(rho_sqrt,Z[:,m])
+            stage += 1
+    elif method_sigma == "step_wise_constant_reverse":
+        sigma = np.nan*np.ones([N])
+        y = iv**2*T[1:]
+        A = alpha*np.tri(N)
+        beta_sq = (np.linalg.solve(A,y))
+        sigma = np.sqrt(beta_sq)
+        log_L_simul = np.nan*np.ones([N,int(T[-2]/delta)+1])
+        log_L_simul[:,0] = np.log(L0)
+        stage = 0
+        while stage < N:
+            Z = np.random.standard_normal([N-stage,Mps])
+            rho_sqrt = np.real(sqrtm(rho[stage:N,stage:N]))
+            for m in range(0,Mps):
+                drift = drift_lmm(log_L_simul[stage:N,stage*Mps+m],alpha,sigma[0:N-stage],rho[stage:N,stage:N])
+                log_L_simul[stage:N,stage*Mps+m+1] = log_L_simul[stage:N,stage*Mps+m] - (0.5*sigma[stage:N]**2 + drift)*delta + delta_sqrt*sigma[stage:N]*np.matmul(rho_sqrt,Z[:,m])
+            stage += 1
     return np.exp(log_L_simul)
 
 # Swatiopns
-def black_swaption_price(sigma,T,K,S,R,type = "call"):
+def black_swaption_price(sigma,T,K,S,R,type_option = "call"):
+    # sigma := The volatility parameter
+    # T     := Time to maturity
+    # K     := p_strike
+    # S     := Accrual factor
+    # R     := forward par swap rate (Underlying asset)
     d1 = (np.log(R/K) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
     d2 = (np.log(R/K) - 0.5*sigma**2*T)/(sigma*np.sqrt(T))
-    if type == 'put':
+    if type_option == 'put':
         price = S*(K*ndtr(-d2) - R*ndtr(-d1))
     else:
         price = S*(R*ndtr(d1) - K*ndtr(d2))
     return price
 
-def black_swaption_delta(sigma,T,K,S,R,type = "call"):
+def black_swaption_delta(sigma,T,K,S,R,type_option = "call"):
     d1 = (np.log(R/K) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
     # d2 = (np.log(R/K) - 0.5*sigma**2*T)/(sigma*np.sqrt(T))
-    if type == 'call':
+    if type_option == 'call':
         # price = S*(R*ndtr(d1) - K*ndtr(d2))
         delta = S*ndtr(d1)  # - price/R + S*(R*norm.pdf(d1) - K*norm.pdf(d2))/(R*sigma*np.sqrt(T))
     return delta
 
-def black_swaption_gamma(sigma,T,K,S,R,type = "call"):
+def black_swaption_gamma(sigma,T,K,S,R,type_option = "call"):
     d1 = (np.log(R/K) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
     d2 = (np.log(R/K) - 0.5*sigma**2*T)/(sigma*np.sqrt(T))
-    if type == 'call':
+    if type_option == 'call':
         price = S*(R*ndtr(d1) - K*ndtr(d2))
         gamma = (2/R**2)*price + (S/R)*(norm.pdf(d1)/(sigma*np.sqrt(T)) - 2*ndtr(d1))
     return gamma
 
-def black_swaption_vega(sigma,T,K,S,R,type = "call"):
+def black_swaption_vega(sigma,T,K,S,R,type_option = "call"):
     d1 = (np.log(R/K) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
-    if type == 'call':
+    if type_option == 'call':
         vega = S*R*norm.pdf(d1) * np.sqrt(T)
     return vega
 
-def black_swaption_theta(sigma,T,K,S,r,R,type = "call"):
+def black_swaption_theta(sigma,T,K,S,r,R,type_option = "call"):
     d1 = (np.log(R/K) + 0.5*sigma**2*T)/(sigma*np.sqrt(T))
     d2 = (np.log(R/K) - 0.5*sigma**2*T)/(sigma*np.sqrt(T))
-    if type == 'call':
+    if type_option == 'call':
         price = S*(R*ndtr(d1) - K*ndtr(d2))
         theta = r*price - S*R*sigma*norm.pdf(d1)/(2*np.sqrt(T))
     return theta
 
-def black_swaption_iv(C,T,K,S,R,type = "call", iv0 = 0.2, max_iter = 1000, prec = 1.0e-10):
+def black_swaption_iv(C,T,K,S,R,type_option = "call", iv0 = 0.2, max_iter = 1000, prec = 1.0e-10):
+    # C     := Swaption price for which to find the implied volatility
+    # T     := Time to maturity
+    # K     := p_strike
+    # S     := Accrual factor
+    # R     := forward par swap rate (Underlying asset)
     iv = iv0
     for i in range(0,max_iter):
-        price = black_swaption_price(iv,T,K,S,R,type = "call")
-        vega = black_swaption_vega(iv,T,K,S,R,type = "call")
+        price = black_swaption_price(iv,T,K,S,R,type_option = "call")
+        vega = black_swaption_vega(iv,T,K,S,R,type_option = "call")
         diff = C - price
         if abs(diff) < prec:
             return iv
@@ -1083,7 +1266,7 @@ def black_swaption_iv(C,T,K,S,R,type = "call", iv0 = 0.2, max_iter = 1000, prec 
     return iv
 
 # Swap Market Model
-def simul_smm(R0,T,sigma,rho,M,type = "regular"):
+def simul_smm(R0,T,sigma,rho,M,type_model = "regular"):
     N = len(R0) - 1
     delta = T[1]*(N+1)/M
     delta_sqrt = np.sqrt(delta)
@@ -1494,44 +1677,6 @@ def zcb_curve_interpolate(T_inter,T,R,interpolation_options = {"method":"linear"
         f_inter[i] = R_inter[i] + R_inter_deriv[i]*T_inter[i]
         p_inter[i] = np.exp(-R_inter[i]*T_inter[i])
     return p_inter, R_inter, f_inter, T_inter
-
-def spot_rate_bump(T_bump,size_bump,T,R_input,p_input):
-    R, p = R_input.copy(), p_input.copy()
-    if type(T_bump) == int or type(T_bump) == float or type(T_bump) == np.float64 or type(T_bump) == np.int32 or type(T_bump) == np.int64:
-        I_bump, idx_bump = value_in_list_returns_I_idx(T_bump,T)
-        R[idx_bump] = R[idx_bump] + size_bump
-        p[idx_bump] = np.exp(-R[idx_bump]*T_bump)
-    elif type(T_bump) == tuple or type(T_bump) == list or type(T_bump) == np.ndarray:
-        if type(size_bump) == int or type(size_bump) == float or type(size_bump) == np.float64:
-            for i in range(0,len(T_bump)):
-                I_bump, idx_bump = value_in_list_returns_I_idx(T_bump[i],T)
-                R[idx_bump] = R[idx_bump] + size_bump
-                p[idx_bump] = np.exp(-R[idx_bump]*T_bump[i])
-        elif type(size_bump) == tuple or type(size_bump) == list or type(size_bump) == np.ndarray:
-            for i in range(0,len(T_bump)):
-                I_bump, idx_bump = value_in_list_returns_I_idx(T_bump[i],T)
-                R[idx_bump] = R[idx_bump] + size_bump[i]
-                p[idx_bump] = np.exp(-R[idx_bump]*T_bump[i])
-    return R, p
-
-def market_rate_bump(idx_bump,size_bump,T_inter,data,interpolation_options = {"method": "linear"}):
-    data_bump = copy.deepcopy(data)
-    if type(idx_bump) == int or type(idx_bump) == float or type(idx_bump) == np.float64 or type(idx_bump) == np.int32 or type(idx_bump) == np.int64:
-        data_bump[idx_bump]["rate"] += size_bump
-        T_fit_bump, R_fit_bump = zcb_curve_fit(data_bump,interpolation_options = interpolation_options)
-        p_inter_bump, R_inter_bump, f_inter_bump, T_inter_bump = zcb_curve_interpolate(T_inter,T_fit_bump,R_fit_bump,interpolation_options = interpolation_options)
-    elif type(idx_bump) == tuple or type(idx_bump) == list or type(idx_bump) == np.ndarray:
-        if type(size_bump) == int or type(size_bump) == float or type(size_bump) == np.float64 or type(size_bump) == np.int32 or type(size_bump) == np.int64:
-            for i in range(0,len(idx_bump)):
-                data_bump[idx_bump[i]]["rate"] += size_bump
-            T_fit_bump, R_fit_bump = zcb_curve_fit(data_bump,interpolation_options = interpolation_options)
-            p_inter_bump, R_inter_bump, f_inter_bump, T_inter_bump = zcb_curve_interpolate(T_inter,T_fit_bump,R_fit_bump,interpolation_options = interpolation_options)
-        elif type(size_bump) == tuple or type(size_bump) == list or type(size_bump) == np.ndarray:
-            for i in range(0,len(idx_bump)):
-                data_bump[idx_bump[i]]["rate"] += size_bump[i]
-            T_fit_bump, R_fit_bump = zcb_curve_fit(data_bump,interpolation_options = interpolation_options)
-            p_inter_bump, R_inter_bump, f_inter_bump, T_inter_bump = zcb_curve_interpolate(T_inter,T_fit_bump,R_fit_bump,interpolation_options = interpolation_options)
-    return p_inter_bump, R_inter_bump, f_inter_bump, T_inter_bump, data_bump
 
 def extrapolate(x_extra,x,y,extrapolation_options = {"method":"linear"}):
     # Extrapoltion of value corresponding to a choice of x_extra
